@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -8,6 +9,12 @@ import (
 	"os"
 	"sync"
 )
+
+type Config struct {
+	IP   string `json:"ip"`
+	Port string `json:"port"`
+	Fifo string `json:"fifo"`
+}
 
 var GlobalStats = Stats{
 	ClientCount: 0,
@@ -28,14 +35,31 @@ type ChanReader struct {
 
 func main() {
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: boombox2 <IP:Port>")
+		fmt.Println("Usage: boombox2 <configFile>")
 		return
 	}
 
-	addr := os.Args[1]
+	configFile := os.Args[1]
+
+	file, err := os.Open(configFile)
+	if err != nil {
+		fmt.Println("error opening config file:", err)
+		return
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	config := Config{}
+	err = decoder.Decode(&config)
+	if err != nil {
+		fmt.Println("error reading config file:", err)
+		return
+	}
+
+	addr := net.JoinHostPort(config.IP, config.Port)
 
 	stream := NewStreamWriter()
-	go streamAudio(stream)
+	go streamAudio(stream, config.Fifo)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		clientChan := stream.AddClient()
@@ -103,11 +127,11 @@ func (r *ChanReader) Read(p []byte) (n int, err error) {
 	return copy(p, data), nil
 }
 
-func streamAudio(sw *StreamWriter) {
+func streamAudio(sw *StreamWriter, fifo string) {
 	bufSize := 8192
 	buffer := make([]byte, bufSize)
 
-	audioPipe, err := os.Open("/path/to/your/fifo")
+	audioPipe, err := os.Open(fifo)
 	if err != nil {
 		fmt.Println("error opening audio pipe:", err)
 		return
